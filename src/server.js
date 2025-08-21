@@ -162,6 +162,37 @@ async function start(opts) {
     app.use(cors());
   }
 
+  /**
+   * Checks if the API key is valid
+   * @param {string} api_key - The API key to check
+   * @returns {Promise<boolean>} - True if the API key is valid, false otherwise
+   */
+  async function chechKey(api_key) {
+    try {
+      const url = `${process.env.AUTH_BASE_URL}/api/validation?api_key=${api_key}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        return false;
+      }
+      const data = await response.json();
+      return data.is_valid;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // validation middleware for access tokens
+  app.use('/', async (req, res, next) => {
+    if (!req.query.key) {
+      return res.status(401).send('Missing access token');
+    }
+    const isValid = await chechKey(req.query.key);
+    if (!isValid) {
+      return res.status(401).send('Invalid access token');
+    }
+    next();
+  });
+
   app.use('/data/', serve_data.init(options, serving.data, opts));
   app.use('/files/', express.static(paths.files));
   app.use('/styles/', serve_style.init(options, serving.styles, opts));
