@@ -86,6 +86,10 @@ Static images
 
   * ``maxzoom`` - Maximum zoom level (only for auto endpoint where zoom level is calculated and not provided)
 
+* All the static image endpoints support parameters passing using POST with a JSON body:
+
+  * e.g. ``{"path": ["10,10|20,20", "10,20|20,10"]}`` is the equivalent of ``?path=10,10|20,20&path=10,20|20,10``
+
 * You can also use (experimental) ``/styles/{id}/static/raw/...`` endpoints with raw spherical mercator coordinates (EPSG:3857) instead of WGS84.
 
 * The static images are not available in the ``tileserver-gl-light`` version.
@@ -100,13 +104,18 @@ Source data
 
   * TileJSON at ``/data/{id}.json``
 
-  * If terrain mbtile data is served and ``encoding`` is configured (see config) the elevation can be queried 
+  * If terrain mbtile data is served and ``encoding`` is configured (see config) the elevation can be queried
 
     * by ``/data/{id}/elevation/{z}/{x}/{y}`` for the tile
 
     * or ``/data/{id}/elevation/{z}/{long}/{lat}`` for the coordinate
 
-    * the result will be a json object like ``{"z":7,"x":68,"y":45,"red":134,"green":66,"blue":0,"latitude":11.84069,"longitude":46.04798,"elevation":1602}``
+    * the result will be a json object like ``{"z":7,"x":68,"y":45,"long":46.04798,"lat":11.84069,"elevation":1602,"pixelX":128,"pixelY":256}``
+
+    * for batch requests, POST to ``/data/{id}/elevation`` with a JSON body:
+
+      * Request: ``{"points": [{"lon": 45.5, "lat": 45.5, "z": 1}, ...]}``
+      * Response: ``[500, 200, null, ...]`` - array of elevations (or null if no data) in the same order as input
 
   * The elevation api is not available in the ``tileserver-gl-light`` version.
 
