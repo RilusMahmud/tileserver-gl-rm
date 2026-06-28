@@ -209,22 +209,16 @@ async function start(opts) {
   }
 
   /**
-   * Checks if the API key is valid
+   * Checks if the API key is one of the comma-separated keys in ACCESS_TOKEN.
    * @param {string} api_key - The API key to check
-   * @returns {Promise<boolean>} - True if the API key is valid, false otherwise
+   * @returns {boolean} - True if the API key is valid, false otherwise
    */
-  async function chechKey(api_key) {
-    try {
-      const url = `${process.env.AUTH_BASE_URL}/api/validation?api_key=${api_key}`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        return false;
-      }
-      const data = await response.json();
-      return data.is_valid;
-    } catch (error) {
-      return false;
-    }
+  function chechKey(api_key) {
+    const validKeys = (process.env.ACCESS_TOKEN || '')
+      .split(',')
+      .map((key) => key.trim())
+      .filter(Boolean);
+    return validKeys.includes(api_key);
   }
 
   // validation middleware for access tokens
@@ -232,7 +226,7 @@ async function start(opts) {
     if (!req.query.key) {
       return res.status(401).send('Missing access token');
     }
-    const isValid = await chechKey(req.query.key);
+    const isValid = chechKey(req.query.key);
     if (!isValid) {
       return res.status(401).send('Invalid access token');
     }
