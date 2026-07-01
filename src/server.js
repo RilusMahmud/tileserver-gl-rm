@@ -27,7 +27,7 @@ import {
   isHostAllowed,
   getCandidateHost,
   getSafeProtocol,
-  extractApiKey,
+  extractApiKeys,
 } from './utils.js';
 
 import { fileURLToPath } from 'url';
@@ -249,16 +249,22 @@ async function start(opts) {
   // validation middleware for access tokens
   app.use('/', async (req, res, next) => {
     if (req.path === '/health') return next();
-    const extracted = extractApiKey(req);
-    if (!extracted) {
+    const keys = extractApiKeys(req);
+    if (keys.length === 0) {
       return res.status(401).send('Missing access token');
     }
-    const { key: apiKey, source } = extracted;
+    const apiKey = keys[0].key;
     if (!chechKey(apiKey)) {
       return res.status(401).send('Invalid access token');
     }
     req.apiKey = apiKey;
-    counterModule?.increment(apiKey, source);
+    // Count each channel that carried a valid key, so a key sent via both a query
+    // param and a header is counted once per channel.
+    for (const { key, source } of keys) {
+      if (chechKey(key)) {
+        counterModule?.increment(key, source);
+      }
+    }
     next();
   });
 

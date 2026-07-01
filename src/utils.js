@@ -218,33 +218,46 @@ export const apiKeyHeaders = [
 ];
 
 /**
- * Extracts the API key from a request together with its source: the name of the
- * query param or header it was read from. Any name in {@link apiKeyHeaders} is
- * accepted as either a query param or a header; query params take precedence over
- * headers (preserving the previous `?key=` behaviour), and both are checked in
- * list order. The `source` is the matched name.
+ * Extracts every API key present on a request together with its source: the name
+ * of the query param or header it was read from. Any name in {@link apiKeyHeaders}
+ * is accepted as either a query param or a header, and a request may carry the key
+ * via several channels at once (e.g. a query param and a header). Query params are
+ * listed before headers, both in list order, so the first entry is the key used
+ * for authorization.
  * @param {object} req - Express request object.
- * @returns {{ key: string, source: string } | undefined} - The API key and its
- *   source, or undefined if none is present.
+ * @returns {Array<{ key: string, source: string }>} - One entry per channel that
+ *   carried a key, in precedence order; empty if none is present.
  */
-export function extractApiKey(req) {
+export function extractApiKeys(req) {
+  const found = [];
   for (const name of apiKeyHeaders) {
     // eslint-disable-next-line security/detect-object-injection -- name is from the fixed apiKeyHeaders allowlist
     const value = req.query?.[name];
     if (value) {
-      return {
+      found.push({
         key: String(Array.isArray(value) ? value[0] : value),
         source: name,
-      };
+      });
     }
   }
   for (const name of apiKeyHeaders) {
     const value = req.get(name);
     if (value) {
-      return { key: String(value), source: name };
+      found.push({ key: String(value), source: name });
     }
   }
-  return undefined;
+  return found;
+}
+
+/**
+ * Extracts the primary API key from a request: the first channel in
+ * {@link extractApiKeys} precedence order, together with its source.
+ * @param {object} req - Express request object.
+ * @returns {{ key: string, source: string } | undefined} - The primary API key
+ *   and its source, or undefined if none is present.
+ */
+export function extractApiKey(req) {
+  return extractApiKeys(req)[0];
 }
 
 /**

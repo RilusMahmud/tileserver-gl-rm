@@ -1,7 +1,7 @@
 'use strict';
 
 import { expect } from 'chai';
-import { extractApiKey, apiKeyHeaders } from '../src/utils.js';
+import { extractApiKey, extractApiKeys, apiKeyHeaders } from '../src/utils.js';
 import * as counter from '../src/request_counter.js';
 
 /**
@@ -67,6 +67,34 @@ describe('extractApiKey', function () {
     expect(
       extractApiKey(stubReq({ query: { key: ['a', 'b'] } })),
     ).to.deep.equal({ key: 'a', source: 'key' });
+  });
+});
+
+describe('extractApiKeys', function () {
+  it('returns an empty array when no key is present', function () {
+    expect(extractApiKeys(stubReq())).to.deep.equal([]);
+  });
+
+  it('returns a single channel when the key is in one place', function () {
+    expect(extractApiKeys(stubReq({ query: { key: 'q' } }))).to.deep.equal([
+      { key: 'q', source: 'key' },
+    ]);
+  });
+
+  it('returns both channels (query first) when the same key is in both', function () {
+    const req = stubReq({ query: { key: 'X' }, headers: { 'x-apikey': 'X' } });
+    expect(extractApiKeys(req)).to.deep.equal([
+      { key: 'X', source: 'key' },
+      { key: 'X', source: 'x-apikey' },
+    ]);
+  });
+
+  it('returns each channel when the query and header carry different keys', function () {
+    const req = stubReq({ query: { key: 'X' }, headers: { 'x-apikey': 'Y' } });
+    expect(extractApiKeys(req)).to.deep.equal([
+      { key: 'X', source: 'key' },
+      { key: 'Y', source: 'x-apikey' },
+    ]);
   });
 });
 
