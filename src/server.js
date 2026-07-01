@@ -27,6 +27,7 @@ import {
   isHostAllowed,
   getCandidateHost,
   getSafeProtocol,
+  extractApiKey,
 } from './utils.js';
 
 import { fileURLToPath } from 'url';
@@ -39,6 +40,10 @@ const isLight = packageJson.name.slice(-6) === '-light';
 const { serve_rendered } = await import(
   `${!isLight ? `./serve_rendered.js` : `./serve_light.js`}`
 );
+
+// Active per-API-key request counter module (set when a MongoDB sink is
+// configured). Held at module scope so shutdown/reload can flush it.
+let activeUsageCounter = null;
 
 /**
  *  Starts the server.
@@ -67,6 +72,26 @@ async function start(opts) {
       metricsModule = m;
     } catch (err) {
       console.warn(`[metrics] Failed to import metrics module: ${err.message}`);
+    }
+  }
+
+  // Import per-API-key request counter if a MongoDB sink is configured.
+  // Counting is in-memory on the request path; MongoDB I/O is batched off it.
+  let counterModule = null;
+  if (process.env.MONGODB_URI) {
+    try {
+      counterModule = await import('./request_counter.js');
+      await counterModule.init({
+        uri: process.env.MONGODB_URI,
+        dbName: process.env.USAGE_DB_NAME || 'spl_eLocations',
+        collectionName: process.env.USAGE_COLLECTION || 'maps_usage',
+        flushIntervalMs: Number(process.env.USAGE_FLUSH_INTERVAL_MS) || 10000,
+      });
+      activeUsageCounter = counterModule;
+      console.log('[usage] Per-API-key request counting enabled');
+    } catch (err) {
+      console.warn(`[usage] Request counting disabled: ${err.message}`);
+      counterModule = null;
     }
   }
 
@@ -224,13 +249,15 @@ async function start(opts) {
   // validation middleware for access tokens
   app.use('/', async (req, res, next) => {
     if (req.path === '/health') return next();
-    if (!req.query.key) {
+    const apiKey = extractApiKey(req);
+    if (!apiKey) {
       return res.status(401).send('Missing access token');
     }
-    const isValid = chechKey(req.query.key);
-    if (!isValid) {
+    if (!chechKey(apiKey)) {
       return res.status(401).send('Invalid access token');
     }
+    req.apiKey = apiKey;
+    counterModule?.increment(apiKey);
     next();
   });
 
@@ -1120,8 +1147,13 @@ async function start(opts) {
  * @param {string} signal Name of the received signal
  * @returns {void}
  */
-function stopGracefully(signal) {
+async function stopGracefully(signal) {
   console.log(`Caught signal ${signal}, stopping gracefully`);
+  try {
+    await activeUsageCounter?.close();
+  } catch (err) {
+    console.warn(`[usage] shutdown flush failed: ${err.message}`);
+  }
   process.exit();
 }
 
@@ -1181,6 +1213,10 @@ export async function server(opts) {
           await new Promise((resolve) => running.metricsServer.close(resolve));
         }
         await running.cleanup();
+        if (activeUsageCounter) {
+          await activeUsageCounter.close();
+          activeUsageCounter = null;
+        }
         await serve_data.clear(running.serving.data);
         if (!isLight) {
           await serve_rendered.clear(running.serving.rendered);

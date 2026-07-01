@@ -203,6 +203,40 @@ export function getSafeProtocol(req) {
 }
 
 /**
+ * Header names (besides the `?key=` query param) that may carry the API key.
+ * Checked in order; matching is case-insensitive via req.get().
+ */
+export const apiKeyHeaders = [
+  'Ocp-Apim-Subscription-Key',
+  'x-api-key',
+  'x-apikey',
+  'X-Apigee-API-Key',
+  'X-Goog-Api-Key',
+  'apikey',
+  'key',
+];
+
+/**
+ * Extracts the API key from a request: the `?key=` query param takes precedence,
+ * then the headers in {@link apiKeyHeaders} order.
+ * @param {object} req - Express request object.
+ * @returns {string | undefined} - The API key, or undefined if none is present.
+ */
+export function extractApiKey(req) {
+  const queryKey = req.query?.key;
+  if (queryKey) {
+    return String(Array.isArray(queryKey) ? queryKey[0] : queryKey);
+  }
+  for (const header of apiKeyHeaders) {
+    const value = req.get(header);
+    if (value) {
+      return String(value);
+    }
+  }
+  return undefined;
+}
+
+/**
  * Generates a new URL object from the Express request.
  * @param {object} req - Express request object.
  * @returns {URL} - URL object with correct host and optionally path.
