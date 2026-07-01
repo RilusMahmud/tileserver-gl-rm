@@ -203,8 +203,9 @@ export function getSafeProtocol(req) {
 }
 
 /**
- * Header names (besides the `?key=` query param) that may carry the API key.
- * Checked in order; matching is case-insensitive via req.get().
+ * Names that may carry the API key, as either a query param or a request header.
+ * Checked in order; header matching is case-insensitive via req.get(), query-param
+ * matching is by exact name.
  */
 export const apiKeyHeaders = [
   'Ocp-Apim-Subscription-Key',
@@ -217,20 +218,30 @@ export const apiKeyHeaders = [
 ];
 
 /**
- * Extracts the API key from a request: the `?key=` query param takes precedence,
- * then the headers in {@link apiKeyHeaders} order.
+ * Extracts the API key from a request together with its source: the name of the
+ * query param or header it was read from. Any name in {@link apiKeyHeaders} is
+ * accepted as either a query param or a header; query params take precedence over
+ * headers (preserving the previous `?key=` behaviour), and both are checked in
+ * list order. The `source` is the matched name.
  * @param {object} req - Express request object.
- * @returns {string | undefined} - The API key, or undefined if none is present.
+ * @returns {{ key: string, source: string } | undefined} - The API key and its
+ *   source, or undefined if none is present.
  */
 export function extractApiKey(req) {
-  const queryKey = req.query?.key;
-  if (queryKey) {
-    return String(Array.isArray(queryKey) ? queryKey[0] : queryKey);
-  }
-  for (const header of apiKeyHeaders) {
-    const value = req.get(header);
+  for (const name of apiKeyHeaders) {
+    // eslint-disable-next-line security/detect-object-injection -- name is from the fixed apiKeyHeaders allowlist
+    const value = req.query?.[name];
     if (value) {
-      return String(value);
+      return {
+        key: String(Array.isArray(value) ? value[0] : value),
+        source: name,
+      };
+    }
+  }
+  for (const name of apiKeyHeaders) {
+    const value = req.get(name);
+    if (value) {
+      return { key: String(value), source: name };
     }
   }
   return undefined;

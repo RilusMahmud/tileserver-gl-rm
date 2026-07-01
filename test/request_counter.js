@@ -22,20 +22,41 @@ function stubReq({ query = {}, headers = {} } = {}) {
 describe('extractApiKey', function () {
   it('prefers the ?key= query param over headers', function () {
     const req = stubReq({ query: { key: 'q' }, headers: { 'x-api-key': 'h' } });
-    expect(extractApiKey(req)).to.equal('q');
+    expect(extractApiKey(req)).to.deep.equal({ key: 'q', source: 'key' });
   });
 
   it('reads the key from each supported header when no query key', function () {
     for (const header of apiKeyHeaders) {
       const req = stubReq({ headers: { [header]: 'v' } });
-      expect(extractApiKey(req), header).to.equal('v');
+      expect(extractApiKey(req), header).to.deep.equal({
+        key: 'v',
+        source: header,
+      });
     }
   });
 
-  it('matches header names case-insensitively', function () {
-    expect(extractApiKey(stubReq({ headers: { 'X-API-KEY': 'v' } }))).to.equal(
-      'v',
-    );
+  it('reads the key from each supported name as a query param', function () {
+    for (const name of apiKeyHeaders) {
+      const req = stubReq({ query: { [name]: 'v' } });
+      expect(extractApiKey(req), name).to.deep.equal({
+        key: 'v',
+        source: name,
+      });
+    }
+  });
+
+  it('prefers a query param over a header of a different supported name', function () {
+    const req = stubReq({
+      query: { apikey: 'q' },
+      headers: { 'x-api-key': 'h' },
+    });
+    expect(extractApiKey(req)).to.deep.equal({ key: 'q', source: 'apikey' });
+  });
+
+  it('matches header names case-insensitively and reports the configured name', function () {
+    expect(
+      extractApiKey(stubReq({ headers: { 'X-API-KEY': 'v' } })),
+    ).to.deep.equal({ key: 'v', source: 'x-api-key' });
   });
 
   it('returns undefined when no key is present', function () {
@@ -43,9 +64,9 @@ describe('extractApiKey', function () {
   });
 
   it('takes the first value when the query key is an array', function () {
-    expect(extractApiKey(stubReq({ query: { key: ['a', 'b'] } }))).to.equal(
-      'a',
-    );
+    expect(
+      extractApiKey(stubReq({ query: { key: ['a', 'b'] } })),
+    ).to.deep.equal({ key: 'a', source: 'key' });
   });
 });
 
@@ -62,16 +83,18 @@ describe('request_counter', function () {
       },
     };
     await counter.init({ collection, flushIntervalMs: 1e9 });
-    counter.increment('a');
-    counter.increment('a');
-    counter.increment('b');
+    counter.increment('a', 'key');
+    counter.increment('a', 'x-apikey');
+    counter.increment('b', 'key');
     await counter.flush();
 
     const a = ops.find((o) => o.updateOne.filter._id === 'a');
     const b = ops.find((o) => o.updateOne.filter._id === 'b');
     expect(a.updateOne.update.$inc.count).to.equal(2);
+    expect(a.updateOne.update.$set.source).to.equal('x-apikey'); // latest wins
     expect(a.updateOne.upsert).to.equal(true);
     expect(b.updateOne.update.$inc.count).to.equal(1);
+    expect(b.updateOne.update.$set.source).to.equal('key');
   });
 
   it('does not call the collection when the buffer is empty', async function () {

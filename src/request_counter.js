@@ -48,10 +48,19 @@ export async function init({
 /**
  * Record one request for the given API key (in-memory, non-blocking).
  * @param {string} key - The API key.
+ * @param {string} [source] - Where the key was read from (query param or header name).
  * @returns {void}
  */
-export function increment(key) {
-  buffer.set(key, (buffer.get(key) || 0) + 1);
+export function increment(key, source) {
+  const entry = buffer.get(key);
+  if (entry) {
+    entry.count += 1;
+    if (source !== undefined) {
+      entry.source = source; // latest source wins
+    }
+  } else {
+    buffer.set(key, { count: 1, source });
+  }
 }
 
 /**
@@ -66,11 +75,15 @@ export async function flush() {
   const pending = buffer;
   buffer = new Map(); // swap-and-drain so new increments accumulate independently
   const ops = [];
-  for (const [key, count] of pending) {
+  for (const [key, { count, source }] of pending) {
+    const update = { $inc: { count }, $set: { lastSeen: new Date() } };
+    if (source !== undefined) {
+      update.$set.source = source;
+    }
     ops.push({
       updateOne: {
         filter: { _id: key },
-        update: { $inc: { count }, $set: { lastSeen: new Date() } },
+        update,
         upsert: true,
       },
     });
@@ -78,8 +91,13 @@ export async function flush() {
   try {
     await collection.bulkWrite(ops, { ordered: false });
   } catch (err) {
-    for (const [key, count] of pending) {
-      buffer.set(key, (buffer.get(key) || 0) + count);
+    for (const [key, { count, source }] of pending) {
+      const entry = buffer.get(key);
+      if (entry) {
+        entry.count += count; // increments during the flush carry a newer source
+      } else {
+        buffer.set(key, { count, source });
+      }
     }
     console.warn(`[usage] flush failed: ${err.message}`);
   }

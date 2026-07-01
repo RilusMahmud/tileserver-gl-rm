@@ -249,15 +249,16 @@ async function start(opts) {
   // validation middleware for access tokens
   app.use('/', async (req, res, next) => {
     if (req.path === '/health') return next();
-    const apiKey = extractApiKey(req);
-    if (!apiKey) {
+    const extracted = extractApiKey(req);
+    if (!extracted) {
       return res.status(401).send('Missing access token');
     }
+    const { key: apiKey, source } = extracted;
     if (!chechKey(apiKey)) {
       return res.status(401).send('Invalid access token');
     }
     req.apiKey = apiKey;
-    counterModule?.increment(apiKey);
+    counterModule?.increment(apiKey, source);
     next();
   });
 
