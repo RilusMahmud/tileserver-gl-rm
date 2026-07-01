@@ -223,6 +223,7 @@ async function start(opts) {
 
   // validation middleware for access tokens
   app.use('/', async (req, res, next) => {
+    if (req.path === '/health') return next();
     if (!req.query.key) {
       return res.status(401).send('Missing access token');
     }
