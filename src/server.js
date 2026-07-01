@@ -27,7 +27,8 @@ import {
   isHostAllowed,
   getCandidateHost,
   getSafeProtocol,
-  extractApiKeys,
+  extractAccessToken,
+  extractHeaderApiKeys,
 } from './utils.js';
 
 import { fileURLToPath } from 'url';
@@ -249,21 +250,21 @@ async function start(opts) {
   // validation middleware for access tokens
   app.use('/', async (req, res, next) => {
     if (req.path === '/health') return next();
-    const keys = extractApiKeys(req);
-    if (keys.length === 0) {
+    const accessToken = extractAccessToken(req);
+    if (!accessToken) {
       return res.status(401).send('Missing access token');
     }
-    const apiKey = keys[0].key;
-    if (!chechKey(apiKey)) {
+    if (!chechKey(accessToken)) {
       return res.status(401).send('Invalid access token');
     }
-    req.apiKey = apiKey;
-    // Count each channel that carried a valid key, so a key sent via both a query
-    // param and a header is counted once per channel.
-    for (const { key, source } of keys) {
-      if (chechKey(key)) {
-        counterModule?.increment(key, source);
-      }
+    req.apiKey = accessToken;
+    // Count the validated access token (source `key`), plus every third-party key
+    // carried in the listed headers. Header keys are counted as-is, without
+    // ACCESS_TOKEN validation, so this runs only after the access token authorizes
+    // the request.
+    counterModule?.increment(accessToken, 'key');
+    for (const { key, source } of extractHeaderApiKeys(req)) {
+      counterModule?.increment(key, source);
     }
     next();
   });

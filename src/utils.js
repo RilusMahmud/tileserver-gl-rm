@@ -203,9 +203,10 @@ export function getSafeProtocol(req) {
 }
 
 /**
- * Names that may carry the API key, as either a query param or a request header.
- * Checked in order; header matching is case-insensitive via req.get(), query-param
- * matching is by exact name.
+ * Header names that may carry a third-party API key to be counted. Unlike the
+ * `?key=` access token, these are NOT validated against ACCESS_TOKEN — any value
+ * is counted as-is, recorded with the header name as its `source`. Matching is
+ * case-insensitive via req.get().
  */
 export const apiKeyHeaders = [
   'Ocp-Apim-Subscription-Key',
@@ -218,46 +219,47 @@ export const apiKeyHeaders = [
 ];
 
 /**
- * Extracts every API key present on a request together with its source: the name
- * of the query param or header it was read from. Any name in {@link apiKeyHeaders}
- * is accepted as either a query param or a header, and a request may carry the key
- * via several channels at once (e.g. a query param and a header). Query params are
- * listed before headers, both in list order, so the first entry is the key used
- * for authorization.
- * @param {object} req - Express request object.
- * @returns {Array<{ key: string, source: string }>} - One entry per channel that
- *   carried a key, in precedence order; empty if none is present.
+ * Max length of a header-carried key we will count. Header values are untrusted
+ * and become the MongoDB `_id`, which has a hard index-key size limit; skipping
+ * over-length values keeps a single bad header from wedging the flush.
  */
-export function extractApiKeys(req) {
-  const found = [];
-  for (const name of apiKeyHeaders) {
-    // eslint-disable-next-line security/detect-object-injection -- name is from the fixed apiKeyHeaders allowlist
-    const value = req.query?.[name];
-    if (value) {
-      found.push({
-        key: String(Array.isArray(value) ? value[0] : value),
-        source: name,
-      });
-    }
+const MAX_HEADER_KEY_LENGTH = 512;
+
+/**
+ * Extracts the access token from the `?key=` query param. This is the only value
+ * validated against ACCESS_TOKEN for authorization.
+ * @param {object} req - Express request object.
+ * @returns {string | undefined} - The access token, or undefined if not present.
+ */
+export function extractAccessToken(req) {
+  const queryKey = req.query?.key;
+  if (!queryKey) {
+    return undefined;
   }
-  for (const name of apiKeyHeaders) {
-    const value = req.get(name);
-    if (value) {
-      found.push({ key: String(value), source: name });
-    }
-  }
-  return found;
+  return String(Array.isArray(queryKey) ? queryKey[0] : queryKey);
 }
 
 /**
- * Extracts the primary API key from a request: the first channel in
- * {@link extractApiKeys} precedence order, together with its source.
+ * Extracts every third-party API key carried in the headers listed in
+ * {@link apiKeyHeaders}, together with its source (the header name). These keys
+ * are counted without ACCESS_TOKEN validation; values longer than
+ * {@link MAX_HEADER_KEY_LENGTH} are skipped so they stay usable as a MongoDB `_id`.
  * @param {object} req - Express request object.
- * @returns {{ key: string, source: string } | undefined} - The primary API key
- *   and its source, or undefined if none is present.
+ * @returns {Array<{ key: string, source: string }>} - One entry per header that
+ *   carried a countable value; empty if none are present.
  */
-export function extractApiKey(req) {
-  return extractApiKeys(req)[0];
+export function extractHeaderApiKeys(req) {
+  const found = [];
+  for (const name of apiKeyHeaders) {
+    const value = req.get(name);
+    if (value) {
+      const key = String(value);
+      if (key.length <= MAX_HEADER_KEY_LENGTH) {
+        found.push({ key, source: name });
+      }
+    }
+  }
+  return found;
 }
 
 /**
