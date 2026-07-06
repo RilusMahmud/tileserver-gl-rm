@@ -91,7 +91,15 @@ describe('request_counter', function () {
     await counter.close();
   });
 
-  it('buffers increments and flushes them as batched upserts', async function () {
+  /**
+   * Returns the current UTC day as YYYY-MM-DD (the bucket increment() uses).
+   * @returns {string} - The current UTC day.
+   */
+  function today() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  it('buffers increments per (key, source, day) and flushes them as batched upserts', async function () {
     const ops = [];
     const collection = {
       bulkWrite: async (o) => {
@@ -100,17 +108,29 @@ describe('request_counter', function () {
     };
     await counter.init({ collection, flushIntervalMs: 1e9 });
     counter.increment('a', 'key');
+    counter.increment('a', 'key');
     counter.increment('a', 'x-apikey');
     counter.increment('b', 'key');
     await counter.flush();
 
-    const a = ops.find((o) => o.updateOne.filter._id === 'a');
-    const b = ops.find((o) => o.updateOne.filter._id === 'b');
-    expect(a.updateOne.update.$inc.count).to.equal(2);
-    expect(a.updateOne.update.$set.source).to.equal('x-apikey'); // latest wins
-    expect(a.updateOne.upsert).to.equal(true);
-    expect(b.updateOne.update.$inc.count).to.equal(1);
-    expect(b.updateOne.update.$set.source).to.equal('key');
+    const day = today();
+    const aKey = ops.find((o) => o.updateOne.filter._id === `${day}|key|a`);
+    const aHeader = ops.find(
+      (o) => o.updateOne.filter._id === `${day}|x-apikey|a`,
+    );
+    const bKey = ops.find((o) => o.updateOne.filter._id === `${day}|key|b`);
+    expect(ops).to.have.length(3);
+    expect(aKey.updateOne.upsert).to.equal(true);
+    expect(aKey.updateOne.update.$inc.count).to.equal(2);
+    expect(aKey.updateOne.update.$setOnInsert).to.deep.equal({
+      key: 'a',
+      source: 'key',
+      date: new Date(`${day}T00:00:00Z`),
+    });
+    // same key on another source is its own document, not "latest wins"
+    expect(aHeader.updateOne.update.$inc.count).to.equal(1);
+    expect(aHeader.updateOne.update.$setOnInsert.source).to.equal('x-apikey');
+    expect(bKey.updateOne.update.$inc.count).to.equal(1);
   });
 
   it('does not call the collection when the buffer is empty', async function () {
@@ -138,11 +158,12 @@ describe('request_counter', function () {
       },
     };
     await counter.init({ collection, flushIntervalMs: 1e9 });
-    counter.increment('x');
+    counter.increment('x', 'key');
     await counter.flush(); // fails -> re-buffers
+    counter.increment('x', 'key'); // merges into the re-buffered entry
     await counter.flush(); // succeeds
 
-    const x = ops.find((o) => o.updateOne.filter._id === 'x');
-    expect(x.updateOne.update.$inc.count).to.equal(1);
+    const x = ops.find((o) => o.updateOne.filter._id === `${today()}|key|x`);
+    expect(x.updateOne.update.$inc.count).to.equal(2);
   });
 });
